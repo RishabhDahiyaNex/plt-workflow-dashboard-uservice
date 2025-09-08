@@ -16,3 +16,7 @@ bootJar {
     enabled = true
     mainClass.set("com.nextuple.workflow.PLTWorkflowDashboardApplication")
 }
+
+dependencies {
+    implementation project (path: ':workflow-engine')
+}

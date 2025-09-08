@@ -9,3 +9,4 @@
  */
 rootProject.name = 'plt-workflow-dashboard-uservice'
 include 'app'
+include 'workflow-engine'
