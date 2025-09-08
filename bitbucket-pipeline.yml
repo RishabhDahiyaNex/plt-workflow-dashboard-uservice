@@ -1,0 +1,258 @@
+options:
+  docker: true
+image: openjdk:17
+clone:
+  depth: full
+server:
+  service:
+    name: "plt-workflow-dashboard-uservice"
+    path: "services/plt-workflow-uservice"
+    health-check-endpoint: "/actuator/health"
+  environments:
+    vapt:
+      ingress: yes
+      middleman: yes
+      prometheus: yes
+      keyvault: yes
+      scale:
+        replicas: 2
+      resources:
+        min:
+          memory: "1024Mi"
+          cpu: 256m
+        max:
+          memory: "1024Mi"
+          cpu: 256m
+    prod:
+      ingress: yes
+      middleman: yes
+      prometheus: yes
+      keyvault: yes
+      scale:
+        replicas: 2
+      resources:
+        min:
+          memory: "1024Mi"
+          cpu: "500m"
+        max:
+          memory: "1024Mi"
+          cpu: "500m"
+    test:
+      ingress: yes
+      middleman: yes
+      prometheus: yes
+      keyvault: yes
+      scale:
+        replicas: 2
+      resources:
+        min:
+          memory: "1024Mi"
+          cpu: 256m
+        max:
+          memory: "1024Mi"
+          cpu: 256m
+    dev:
+      ingress: yes
+      middleman: yes
+      prometheus: yes
+      keyvault: yes
+      scale:
+        replicas: 1
+      resources:
+        min:
+          memory: "1024Mi"
+          cpu: 256m
+        max:
+          memory: "1024Mi"
+          cpu: 256m
+    qa:
+      ingress: yes
+      middleman: yes
+      prometheus: yes
+      keyvault: yes
+      scale:
+        replicas: 1
+      resources:
+        min:
+          memory: 1024Mi
+          cpu: 256m
+        max:
+          memory: 1024Mi
+          cpu: 256m
+    pltdev:
+      kong-class: plt-kong
+      ingress: yes
+      middleman: no
+      globalUi: no
+      prometheus: no
+      scale:
+        replicas: 1
+      resources:
+        min:
+          memory: '1024Mi'
+          cpu: 256m
+        max:
+          memory: '1024Mi'
+          cpu: 256m
+    pltqa:
+      kong-class: plt-kong
+      ingress: yes
+      middleman: no
+      globalUi: no
+      prometheus: no
+      scale:
+        replicas: 1
+      resources:
+        min:
+          memory: '1024Mi'
+          cpu: 256m
+        max:
+          memory: '1024Mi'
+          cpu: 256m
+definitions:
+  caches:
+    sonar: ~/.sonar/cache
+    cve: ~/.cve
+  steps:
+    - step: &build
+        size: 2x
+        name: Build Snapshot
+        script:
+          - microdnf install git
+          - microdnf install findutils
+          - git clone git@bitbucket.org:nextuple_engineering/deployment-scripts.git
+          - chmod +x ./deployment-scripts/Auto-version-update/push_version_change.sh
+          - chmod +x ./deployment-scripts/Auto-version-update/version_update.sh
+          - ./deployment-scripts/Auto-version-update/version_update.sh
+          - git clone git@bitbucket.org:nextuple_engineering/infra-automation.git
+          - ./infra-automation/copySuppressions.sh
+          - bash ./gradlew -Pbuild_target=SNAPSHOT clean build artifactoryPublish
+          - export SPACE=" "
+          - bash ./gradlew -Pbuild_target=SNAPSHOT -q properties | grep version | sed -e "s@version:$SPACE@@g" | grep -v Catalog > service-version.txt
+          - bash ./gradlew -Pbuild_target=SNAPSHOT -PazureStorageConnectionString=$AZURE_CONNECTION_STRING copyJar uploadCommitJarToAzure
+          - ./deployment-scripts/Auto-version-update/push_version_change.sh
+        artifacts:
+          - "**/build/**"
+          - service-version.txt
+    - step: &build-qa
+        name: Build QA
+        script:
+          - bash ./gradlew -Pbuild_target=QA clean build --refresh-dependencies artifactoryPublish
+          - export SPACE=" "
+          - bash ./gradlew -Pbuild_target=QA -q properties | grep version | sed -e "s@version:$SPACE@@g" > service-version.txt
+        artifacts:
+          - "**/build/**"
+          - service-version.txt
+    - step: &build-stage
+        name: Build Stage
+        script:
+          - bash ./gradlew -Pbuild_target=STAGED clean build artifactoryPublish
+          - export SPACE=" "
+          - bash ./gradlew -Pbuild_target=STAGED -q properties | grep version | sed -e "s@version:$SPACE@@g" > service-version.txt
+        artifacts:
+          - build/**
+          - service-version.txt
+    - step: &build-release
+        name: Build and Publish Release
+        script:
+          - microdnf install git
+          - microdnf install findutils
+          - "sed -i 's/release: false/release: true/' version.yml"
+          - cat version.yml
+          - bash ./gradlew -Pbuild_target=RELEASE clean build artifactoryPublish
+    - step: &deploy
+        services:
+          - docker
+        image: mcr.microsoft.com/azure-cli:2.53.1
+        script:
+          - git clone git@bitbucket.org:nextuple_engineering/deployment-scripts.git
+          - chmod +x ./deployment-scripts/deploy-k8s.sh
+          - ./deployment-scripts/deploy-k8s.sh
+        after-script:
+          - chmod +x ./deployment-scripts/after-deploy-k8s-service-v3.sh
+          - ./deployment-scripts/after-deploy-k8s-service-v3.sh
+    - step: &pr-build
+        size: 2x
+        name: PR Build
+        script:
+          - microdnf install git
+          - microdnf install findutils
+          - git clone git@bitbucket.org:nextuple_engineering/infra-automation.git
+          - ./infra-automation/copySuppressions.sh
+          - bash ./gradlew -Pbuild_target=SNAPSHOT clean build jacocoTestReport spotlessApply spotbugsMain
+          - bash ./gradlew dependencyCheckAggregate --info
+          - bash ./gradlew sonarqube showSonarQubeLink --info
+pipelines:
+  pull-requests:
+    '**':
+      - step: *pr-build
+  tags:
+    '*-SNAPSHOT':
+      - step: *build
+      - step:
+          !!merge <<: *deploy
+          name: Deploy Dev
+          trigger: manual
+          deployment: dev
+      - step:
+          !!merge <<: *deploy
+          name: Deploy QA
+          trigger: manual
+          deployment: qa
+      - step:
+          !!merge <<: *deploy
+          name: Deploy Test
+          trigger: manual
+          deployment: test
+      - step:
+          !!merge <<: *deploy
+          name: Deploy Demo
+          trigger: manual
+          deployment: demo
+    '*-RELEASE':
+      - step: *build-release
+      - step:
+          !!merge <<: *deploy
+          name: Deploy Prod
+          trigger: manual
+  branches:
+    vapt:
+      - step: *build
+      - step:
+          !!merge <<: *deploy
+          name: Deploy vapt
+          deployment: vapt
+    development:
+      - step: *build
+      - step:
+          !!merge <<: *deploy
+          name: Deploy PltDev
+          deployment: pltdev
+      - step:
+          !!merge <<: *deploy
+          name: Deploy PltQA
+          trigger: manual
+          deployment: pltqa
+      - step:
+          !!merge <<: *deploy
+          name: Deploy Dev
+          trigger: manual
+          deployment: dev
+      - step:
+          !!merge <<: *deploy
+          name: Deploy QA
+          trigger: manual
+          deployment: qa
+      - parallel:
+          - step:
+              !!merge <<: *deploy
+              name: Deploy Test
+              trigger: manual
+              deployment: test
+          - step:
+              !!merge <<: *deploy
+              name: Deploy Demo
+              trigger: manual
+              deployment: demo
+    master:
+      - step: *build-release
