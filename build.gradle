@@ -1,0 +1,388 @@
+/*
+ * Copyright © 2025, Nextuple, Inc. and/or its affiliates. All rights reserved.
+ *
+ *
+ *
+ * The software, code and related documentation made available to you by Nextuple, Inc. are provided under a written agreement containing restrictions on use and disclosure and are protected by copyright and other intellectual property laws. As described in and unless expressly permitted in your agreement, you may not use, copy, reproduce, translate, broadcast, modify, license, transmit, distribute, exhibit, perform, publish, or display any part, in any form, or by any means. Reverse engineering, disassembly, or de-compilation of this software, unless required by law or permitted via contract for interoperability, is strictly prohibited.
+ *
+ * The information contained herein is subject to change without notice and is not warranted to be error-free. If you find any errors, please report them to us in writing.
+ */
+buildscript {
+    repositories {
+        mavenCentral()
+        maven {
+            url "https://plugins.gradle.org/m2/"
+        }
+    }
+    dependencies {
+        classpath "org.springframework.boot:spring-boot-gradle-plugin:3.3.11"
+        classpath "org.jfrog.buildinfo:build-info-extractor-gradle:4.32.0"
+        classpath "org.owasp:dependency-check-gradle:8.2.0"
+        classpath "org.sonatype.gradle.plugins:scan-gradle-plugin:1.2.4"
+    }
+}
+plugins {
+    id 'org.springframework.boot' version '3.3.11'
+    id "java"
+    id "io.spring.dependency-management" version "1.0.15.RELEASE"
+    id "org.sonarqube" version "4.0.0.2929"
+    id "jacoco"
+    id "maven-publish"
+    id "com.github.spotbugs" version "4.7.3"
+    id "com.diffplug.spotless" version "6.11.0"
+}
+ext {
+    build_target = project.hasProperty("build_target") ? project.build_target : "SNAPSHOT"
+    springCloudVersion = "2023.0.3"
+    mapstructVersion = "1.3.1.Final"
+    jodaTimeVersion = "2.10.6"
+    javaxValidationVersion = "2.0.1.Final"
+    jsonpathVersion = "2.4.0"
+    hamcrestJunitVersion = "2.0.0.0"
+    lombokVersion = "1.18.36"
+    sourceJdkVersion = JavaVersion.VERSION_17
+    targetJdkVersion = JavaVersion.VERSION_17
+    apacheLangVersion = "3.9"
+    loadVersion = { ->
+        def versionYamlFile = file('version.yml')
+        if (!versionYamlFile.exists()) {
+            throw new Exception('No version.yml file found')
+        }
+        Yaml yaml = new Yaml()
+        Map versionMap = yaml.load(versionYamlFile.text)
+        Boolean releaseValue = versionMap.version.release.toString().toBoolean()
+        def version = new ApplicationVersion(versionMap.version.major, versionMap.version.minor, versionMap.version.patch, releaseValue, build_target)
+        return [
+                version: version,
+                allowedVersion: versionMap.allowed_version
+        ]
+    }
+}
+group = 'com.nextuple.workflow'
+//version = "0.0.1-${build_target}"
+repositories {
+    mavenCentral()
+    mavenLocal()
+}
+bootJar {
+    enabled = false
+}
+subprojects {
+    apply plugin: 'idea'
+    apply plugin: 'maven-publish'
+    apply plugin: "com.jfrog.artifactory"
+    apply plugin: 'java'
+    apply plugin: 'io.spring.dependency-management'
+    apply plugin: "org.springframework.boot"
+    apply plugin: 'jacoco'
+    apply plugin: 'org.owasp.dependencycheck'
+    apply plugin: "com.github.spotbugs"
+    apply plugin: "com.diffplug.spotless"
+    apply plugin: "org.sonatype.gradle.plugins.scan"
+    group = 'com.nextuple.neoplatform'
+    version = loadVersion().version.getVersion()
+    jar {
+        enabled = true
+        archiveClassifier = ''
+    }
+    bootJar {
+        enabled = false
+    }
+    repositories {
+        mavenCentral()
+        mavenLocal()
+    }
+    tasks.withType(JavaCompile) {
+        options.encoding = 'UTF-8'
+    }
+    dependencyManagement {
+        imports {
+            mavenBom("org.springframework.boot:spring-boot-dependencies:3.3.11")
+            mavenBom("org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}")
+        }
+    }
+    dependencies {
+        compileOnly 'org.projectlombok:lombok:1.18.32'
+        annotationProcessor 'org.projectlombok:lombok:1.18.32'
+        implementation 'org.springframework.boot:spring-boot-starter-web'
+        implementation 'org.springframework.boot:spring-boot-starter-actuator'
+        implementation 'org.springframework.boot:spring-boot-starter-validation'
+        compileOnly "org.projectlombok:lombok:${lombokVersion}"
+        annotationProcessor "org.projectlombok:lombok:${lombokVersion}"
+        testImplementation 'org.junit.jupiter:junit-jupiter-api:5.9.1'
+        testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.9.1'
+    }
+    spotbugs {
+        toolVersion = '4.7.3'
+        ignoreFailures = true
+        onlyAnalyze = ['com.nextuple.*']
+        showStackTraces = false
+    }
+    dependencyCheck {
+        format = 'ALL'
+        suppressionFile = 'suppressions.xml'
+        autoUpdate = true
+        cveValidForHours = 24
+        if (System.getenv("CI") == 'true') {
+            data {
+                directory = "/root/.cve"
+            }
+        }
+    }
+    jacocoTestReport {
+        reports {
+            xml {
+                required.set(true)
+            }
+            html {
+                required.set(true)
+            }
+            csv {
+                required.set(true)
+            }
+        }
+    }
+    spotless {
+        java {
+            importOrder()
+            removeUnusedImports()
+            googleJavaFormat()
+        }
+    }
+    task showSonarQubeLink {
+        doLast {
+            print("Checkout SonarQube report at ${getProperty("systemProp.sonar.host.url")}/dashboard?id=${getProperty("systemProp.sonar.projectKey")}\n")
+        }
+    }
+    artifactoryPublish.skip = false
+    artifactoryPublish {
+        dependsOn jar
+    }
+    artifactory {
+        contextUrl = "${artifactory_contextUrl}"
+        publish {
+            repository {
+                repoKey = 'gradle-dev-local'
+                username = "${artifactory_user}"
+                password = "${artifactory_password}"
+                maven = true
+            }
+            defaults {
+                publications('mavenJava')
+            }
+        }
+        resolve {
+            repository {
+                repoKey = 'gradle-dev'
+                username = "${artifactory_user}"
+                password = "${artifactory_password}"
+                maven = true
+            }
+        }
+    }
+    publishing {
+        publications {
+            mavenJava(MavenPublication) {
+                from components.java
+            }
+        }
+    }
+    configurations {
+        [apiElements, runtimeElements].each {
+//            it.outgoing.artifacts.removeIf { it.buildDependencies.getDependencies(null).contains(jar) }
+            it.outgoing.artifact(bootJar)
+        }
+    }
+    processResources {
+        filesMatching("**/application*.yml") {
+            expand(project.properties)
+        }
+    }
+    test {
+        useJUnitPlatform()
+    }
+}
+sourceCompatibility = "${sourceJdkVersion}"
+targetCompatibility = "${targetJdkVersion}"
+//auto-version increment tasks:
+import org.yaml.snakeyaml.DumperOptions
+import org.yaml.snakeyaml.Yaml
+class ApplicationVersion {
+    Integer major
+    Integer minor
+    Integer patch
+    Boolean release
+    String buildTarget
+    ApplicationVersion(Integer major, Integer minor, Integer patch, Boolean release, String buildTarget) {
+        this.major = major
+        this.minor = minor
+        this.patch = patch
+        this.release = release
+        this.buildTarget = buildTarget
+    }
+    private String getRelease() {
+        return this.release ? '-RELEASE' : '-SNAPSHOT'
+    }
+    String getVersion() {
+        return "$major.$minor.$patch" + this.getRelease()
+    }
+}
+ext.loadVersion = { ->
+    def versionYamlFile = file('version.yml')
+    if (!versionYamlFile.exists()) {
+        throw new Exception('No version.yml file found')
+    }
+    Yaml yaml = new Yaml()
+    Map versionMap = yaml.load(versionYamlFile.text)
+    Boolean releaseValue = versionMap.version.release.toString().toBoolean()
+    def version = new ApplicationVersion(versionMap.version.major, versionMap.version.minor, versionMap.version.patch, releaseValue, build_target)
+    return [
+            version: version,
+            allowedVersion: versionMap.allowed_version
+    ]
+}
+ext.saveVersion = { versionMap ->
+    def versionYamlFile = file('version.yml')
+    DumperOptions options = new DumperOptions()
+    options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK)
+    Yaml yaml = new Yaml(options)
+    versionYamlFile.text = yaml.dump(versionMap)
+}
+ext.saveAllowedVersion = { version ->
+    def allowedVersion = (version.major * 1000000) + (version.minor * 1000) + version.patch
+    def versionYamlFile = file('version.yml')
+    Yaml yaml = new Yaml()
+    Map versionMap = yaml.load(versionYamlFile.text)
+    versionMap.allowed_version = allowedVersion
+    saveVersion(versionMap)
+}
+task initializeAllowedVersion {
+    doLast {
+        def versionData = loadVersion()
+        saveAllowedVersion(versionData.version)
+    }
+}
+task updateAllowedVersion {
+    doLast {
+        def versionData = loadVersion()
+        saveAllowedVersion(versionData.version)
+    }
+}
+version = loadVersion().version.getVersion()
+task majorVersionUpdate(group: 'versioning', description: 'Bump to next major version') {
+    doFirst {
+        def versionData = loadVersion()
+        def versionMap = versionData.version
+        def newVersionMap = [
+                version: [
+                        major: versionMap.major + 1,
+                        minor: 0,
+                        patch: 0,
+                        release: versionMap.release
+                ],
+                allowed_version: versionData.allowedVersion
+        ]
+        saveVersion(newVersionMap)
+    }
+    finalizedBy updateAllowedVersion
+}
+task minorVersionUpdate(group: 'versioning', description: 'Bump to next minor version') {
+    doFirst {
+        def versionData = loadVersion()
+        def versionMap = versionData.version
+        def newVersionMap = [
+                version: [
+                        major: versionMap.major,
+                        minor: versionMap.minor + 1,
+                        patch: 0,
+                        release: versionMap.release
+                ],
+                allowed_version: versionData.allowedVersion
+        ]
+        saveVersion(newVersionMap)
+    }
+    finalizedBy updateAllowedVersion
+}
+task patchVersionUpdate(group: 'versioning', description: 'Bump to next patch version') {
+    doFirst {
+        def versionData = loadVersion()
+        def versionMap = versionData.version
+        def newVersionMap = [
+                version: [
+                        major: versionMap.major,
+                        minor: versionMap.minor,
+                        patch: versionMap.patch + 1,
+                        release: versionMap.release
+                ],
+                allowed_version: versionData.allowedVersion
+        ]
+        saveVersion(newVersionMap)
+    }
+    finalizedBy updateAllowedVersion
+}
+task conditionalPatchVersionUpdate(group: 'versioning', description: 'Bump patch version with conditional logic for minor version update') {
+    doFirst {
+        def versionData = loadVersion()
+        def versionMap = versionData.version
+        if (versionMap.patch == 99) {
+            // Increment minor version and reset patch version to 0
+            println "Patch version is 99. Incrementing minor version and resetting patch."
+            def newVersionMap = [
+                    version: [
+                            major: versionMap.major,
+                            minor: versionMap.minor + 1,
+                            patch: 0,
+                            release: versionMap.release
+                    ],
+                    allowed_version: versionData.allowedVersion
+            ]
+            saveVersion(newVersionMap)
+        } else {
+            // Just increment the patch version
+            println "Incrementing patch version."
+            def newVersionMap = [
+                    version: [
+                            major: versionMap.major,
+                            minor: versionMap.minor,
+                            patch: versionMap.patch + 1,
+                            release: versionMap.release
+                    ],
+                    allowed_version: versionData.allowedVersion
+            ]
+            saveVersion(newVersionMap)
+        }
+    }
+    finalizedBy updateAllowedVersion
+}
+task releaseVersion(group: 'versioning', description: 'Make the version a release') {
+    doFirst {
+        def versionData = loadVersion()
+        def versionMap = versionData.version
+        def newVersionMap = [
+                version: [
+                        major: versionMap.major,
+                        minor: versionMap.minor,
+                        patch: versionMap.patch,
+                        release: true
+                ],
+                allowed_version: versionData.allowedVersion
+        ]
+        saveVersion(newVersionMap)
+    }
+}
+task preReleaseVersion(group: 'versioning', description: 'Make the version a pre-release') {
+    doFirst {
+        def versionData = loadVersion()
+        def versionMap = versionData.version
+        def newVersionMap = [
+                version: [
+                        major: versionMap.major,
+                        minor: versionMap.minor,
+                        patch: versionMap.patch,
+                        release: false
+                ],
+                allowed_version: versionData.allowedVersion
+        ]
+        saveVersion(newVersionMap)
+    }
+}

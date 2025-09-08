@@ -1,0 +1,75 @@
+buildscript {
+    repositories {
+        mavenCentral()
+        maven {
+            url "https://plugins.gradle.org/m2/"
+        }
+    }
+    dependencies {
+        classpath "com.azure:azure-storage-blob:12.26.0"
+    }
+}
+
+import com.azure.storage.blob.BlobContainerClient
+import com.azure.storage.blob.BlobContainerClientBuilder
+import java.nio.file.Files
+ext {
+    azureStorageConnectionString = project.hasProperty("azureStorageConnectionString") ? project.azureStorageConnectionString : ""
+    azureContainer = project.hasProperty("azureContainer") ? project.azureContainer : "java-artifacts"
+    commitJarFolder = "gradle-raw/${rootProject.name}"
+}
+def uploadToAzure(folderName, fileName, filePath) {
+    BlobContainerClient containerClient = new BlobContainerClientBuilder()
+            .connectionString(azureStorageConnectionString)
+            .containerName(azureContainer)
+            .buildClient()
+    if (!containerClient.exists()) {
+        containerClient.create()
+    }
+    def blobClient = containerClient.getBlobClient("${folderName}/${fileName}")
+    blobClient.upload(Files.newInputStream(filePath.toPath()), Files.size(filePath.toPath()), true)
+    println "Uploaded ${fileName} to folder ${folderName} in container ${azureContainer}."
+}
+// Task to create the JAR with the commit ID and root project name
+tasks.register('copyJar') {
+    dependsOn 'bootJar'
+    doLast {
+        def commitId = 'unknown'
+        try {
+            def commit = 'git rev-parse --short HEAD'.execute().text.trim()
+            commitId = commit ?: 'unknown'
+        } catch (Exception e) {
+            println "Failed to retrieve commit ID: ${e.message}"
+        }
+        def bootJarTask = tasks.named("bootJar").get()
+        def rootProjectName = rootProject.name
+        def newJarName = "${rootProjectName}-${version}.${commitId}.jar"
+        copy {
+            from bootJarTask.archiveFile.get().asFile
+            into "$buildDir/libs"
+            rename { String fileName ->
+                newJarName // Rename the JAR with root project name, version, and commit ID
+            }
+        }
+        project.ext.commitJarFile = file("$buildDir/libs/${newJarName}")
+    }
+}
+// Task to upload the JAR with commit ID to Azure
+tasks.register('uploadCommitJarToAzure') {
+    dependsOn 'copyJar'
+    doLast {
+        def commitJarFile = project.ext.commitJarFile
+        int maxTries = 3
+        int currentTry = 0
+        while (!commitJarFile.exists() && currentTry < maxTries) {
+            println "Waiting for commit JAR file to be created..."
+            sleep(1000) // 1 second delay
+            currentTry++
+        }
+        if (commitJarFile.exists()) {
+            uploadToAzure(commitJarFolder, commitJarFile.name, commitJarFile)
+        } else {
+            println "Commit JAR file not found after waiting."
+        }
+    }
+}
