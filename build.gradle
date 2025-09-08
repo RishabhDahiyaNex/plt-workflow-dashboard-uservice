@@ -58,8 +58,10 @@ ext {
         ]
     }
 }
+
 group = 'com.nextuple.workflow'
-//version = "0.0.1-${build_target}"
+version = "0.0.1-${build_target}"
+
 repositories {
     mavenCentral()
     mavenLocal()
@@ -79,8 +81,6 @@ subprojects {
     apply plugin: "com.github.spotbugs"
     apply plugin: "com.diffplug.spotless"
     apply plugin: "org.sonatype.gradle.plugins.scan"
-    group = 'com.nextuple.neoplatform'
-    version = loadVersion().version.getVersion()
     jar {
         enabled = true
         archiveClassifier = ''
