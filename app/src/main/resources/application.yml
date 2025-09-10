@@ -1,0 +1,35 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: plt-workflow-dashboard-uservice
+
+nifi:
+  url: ${NIFI_URL:http://localhost:8080/nifi-api}
+  username: ${NIFI_USERNAME:admin}
+  password: ${NIFI_PASSWORD:admin}
+
+nifi-registry:
+  url: ${NIFI_REGISTRY_URL:http://localhost:18080/nifi-registry-api}
+  username: ${NIFI_REGISTRY_USERNAME:admin}
+  password: ${NIFI_REGISTRY_PASSWORD:admin}
+
+azure:
+  storage:
+    container-name: ${AZURE_CONTAINER_NAME:workflow-storage}
+    account-name: ${AZURE_ACCOUNT_NAME:}
+    account-key: ${AZURE_ACCOUNT_KEY:}
+
+logging:
+  level:
+    com.nextuple.workflow: DEBUG
+    org.springframework.web: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
