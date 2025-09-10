@@ -17,7 +17,7 @@ import java.util.Map;
 
 @Slf4j
 @RestController
-@RequestMapping("/api/v1/workflows")
+@RequestMapping("/api/workflow")
 @RequiredArgsConstructor
 public class WorkflowController {
 
@@ -30,29 +30,30 @@ public class WorkflowController {
         return new ResponseEntity<>(response, HttpStatus.CREATED);
     }
 
-    @PostMapping("/start")
-    public ResponseEntity<Map<String, String>> startWorkflow(@Valid @RequestBody WorkflowActionRequest request) {
-        log.info("Received request to start workflow: {}", request.getWorkflowName());
-        workflowService.startWorkflow(request.getWorkflowName());
+    @PostMapping("/start/{workflowName}")
+    public ResponseEntity<Map<String, String>> startWorkflow(@PathVariable String workflowName) {
+        log.info("Received request to start workflow: {}", workflowName);
+        workflowService.startWorkflow(workflowName);
         return ResponseEntity.ok(Map.of(
             "message", "Workflow started successfully",
-            "workflowName", request.getWorkflowName()
+            "workflowName", workflowName
         ));
     }
 
-    @PostMapping("/stop")
-    public ResponseEntity<Map<String, String>> stopWorkflow(@Valid @RequestBody WorkflowActionRequest request) {
-        log.info("Received request to stop workflow: {}", request.getWorkflowName());
-        workflowService.stopWorkflow(request.getWorkflowName());
+    @PostMapping("/stop/{workflowName}")
+    public ResponseEntity<Map<String, String>> stopWorkflow(@PathVariable String workflowName) {
+        log.info("Received request to stop workflow: {}", workflowName);
+        workflowService.stopWorkflow(workflowName);
         return ResponseEntity.ok(Map.of(
             "message", "Workflow stopped successfully",
-            "workflowName", request.getWorkflowName()
+            "workflowName", workflowName
         ));
     }
 
-    @PutMapping("/update")
-    public ResponseEntity<WorkflowResponse> updateWorkflow(@Valid @RequestBody WorkflowConfigRequest request) {
-        log.info("Received request to update workflow: {}", request.getWorkflowName());
+    @PutMapping("/{workflowName}")
+    public ResponseEntity<WorkflowResponse> updateWorkflow(@PathVariable String workflowName, @Valid @RequestBody WorkflowConfigRequest request) {
+        log.info("Received request to update workflow: {}", workflowName);
+        request.setWorkflowName(workflowName);
         WorkflowResponse response = workflowService.updateWorkflow(request);
         return ResponseEntity.ok(response);
     }
