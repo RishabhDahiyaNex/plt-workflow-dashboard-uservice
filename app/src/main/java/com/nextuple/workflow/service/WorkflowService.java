@@ -155,7 +155,7 @@ public class WorkflowService {
                         .workflowId((String) component.get("id"))
                         .workflowName((String) component.get("name"))
                         .workflowType("UNKNOWN") // Type not available in process group info
-                        .status(getWorkflowStatus((String) component.get("id")))
+                        .status(getProcessGroupStatusString((String) component.get("id")))
                         .description((String) component.get("comments"))
                         .build();
                     workflows.add(workflow);
@@ -182,7 +182,7 @@ public class WorkflowService {
             .workflowId(processGroupId)
             .workflowName((String) component.get("name"))
             .workflowType("UNKNOWN") // Type not available in process group info
-            .status(getWorkflowStatus(processGroupId))
+            .status(getProcessGroupStatusString(processGroupId))
             .description((String) component.get("comments"))
             .build();
     }
@@ -213,7 +213,7 @@ public class WorkflowService {
             .build();
     }
 
-    private String getWorkflowStatus(String processGroupId) {
+    private String getProcessGroupStatusString(String processGroupId) {
         try {
             Map<String, Object> statusResponse = nifiService.getProcessGroupStatus(processGroupId);
             Map<String, Object> processGroupStatus = (Map<String, Object>) statusResponse.get("processGroupStatus");
